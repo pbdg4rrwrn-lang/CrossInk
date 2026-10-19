@@ -1,7 +1,16 @@
 #include "ReadingSessionStats.h"
 
+#include <Logging.h>
+
 void commitReadingSession(BookReadingStats& book, GlobalReadingStats& global, const uint32_t seconds,
                           const ReadingStatsDateTime* sessionStart) {
+  if (sessionStart) {
+    LOG_INF("SESSION", "commit: %u s active, started %04d-%02d-%02d %02d:%02d", (unsigned)seconds,
+            sessionStart->date.year, sessionStart->date.month, sessionStart->date.day, sessionStart->hour,
+            sessionStart->minute);
+  } else {
+    LOG_INF("SESSION", "commit: %u s active, no start time", (unsigned)seconds);
+  }
   // Page intervals longer than the idle threshold are rejected before they
   // reach the session total, so seconds is active reading time.
   if (seconds >= 60) {
