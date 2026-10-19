@@ -771,7 +771,8 @@ void XtcReaderActivity::commitReadingStats() {
   if (statsTrackingActive) {
     recordCurrentPageReadingTime("session_commit");
     ReadingSessionLog::append(hasSessionStartLocalDateTime ? &sessionStartLocalDateTime : nullptr,
-                              sessionReadingSeconds, xtc->getTitle(), xtc->getPath());
+                              sessionReadingSeconds, ReadingSessionLog::ELAPSED_UNKNOWN, xtc->getTitle(),
+                              xtc->getPath());
     commitReadingSession(stats, globalStats, sessionReadingSeconds,
                          hasSessionStartLocalDateTime ? &sessionStartLocalDateTime : nullptr);
   }

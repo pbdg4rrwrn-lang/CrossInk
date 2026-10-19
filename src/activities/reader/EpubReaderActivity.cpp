@@ -5712,6 +5712,7 @@ void EpubReaderActivity::startSessionLog() {
   if (sessionLogActive || !statsTrackingActive) return;
   sessionLogActive = true;
   sessionLogBaselineSeconds = liveSessionReadingSeconds();
+  sessionLogStartMs = millis();
   hasSessionLogStartLocalDateTime = getCurrentLocalReadingStatsDateTime(sessionLogStartLocalDateTime);
   LOG_INF("SESSION", "Manual log started");
 }
@@ -5723,8 +5724,10 @@ void EpubReaderActivity::stopSessionLog() {
   const uint32_t loggedSeconds = live > sessionLogBaselineSeconds ? live - sessionLogBaselineSeconds : 0;
   LOG_INF("SESSION", "Manual log stopped: %u s", static_cast<unsigned>(loggedSeconds));
   if (epub) {
+    // Clock time from start to stop, rounded to the nearest second.
+    const uint32_t elapsedSeconds = static_cast<uint32_t>((millis() - sessionLogStartMs + 500UL) / 1000UL);
     ReadingSessionLog::append(hasSessionLogStartLocalDateTime ? &sessionLogStartLocalDateTime : nullptr, loggedSeconds,
-                              epub->getTitle(), epub->getPath());
+                              elapsedSeconds, epub->getTitle(), epub->getPath());
   }
 }
 

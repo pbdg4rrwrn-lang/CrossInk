@@ -5,6 +5,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 
 #include "CrossPointSettings.h"
 
@@ -12,7 +13,10 @@ namespace ReadingSessionLog {
 namespace {
 
 constexpr char LOG_PATH[] = "/reading_sessions.csv";
-constexpr char LOG_HEADER[] = "start,end,active_seconds,title,path\n";
+constexpr char LOG_HEADER[] = "start,end,active_seconds,elapsed_seconds,title,path\n";
+constexpr char ARCHIVE_PATH[] = "/reading_sessions_v1.csv";
+constexpr char ARCHIVE_PATH_PATTERN[] = "/reading_sessions_v1_%u.csv";
+constexpr unsigned MAX_ARCHIVES = 100;
 
 // Runaway guard so a bug can never fill the card. A row is ~150 bytes, so this
 // holds roughly 13,000 sessions (years of reading).
@@ -53,11 +57,49 @@ std::string csvField(const std::string& value) {
   return out;
 }
 
+// True when the file is missing, empty, or already uses LOG_HEADER. Otherwise
+// moves the old file aside so the new layout starts in a clean file.
+bool prepareLogSchema() {
+  if (!Storage.exists(LOG_PATH)) return true;
+
+  HalFile file = Storage.open(LOG_PATH, O_RDONLY);
+  if (!file) {
+    LOG_ERR("SESSION", "Failed to inspect %s", LOG_PATH);
+    return false;
+  }
+  constexpr size_t headerLen = sizeof(LOG_HEADER) - 1;
+  char header[sizeof(LOG_HEADER)];
+  const bool empty = file.size() == 0;
+  const int read = empty ? 0 : file.read(header, headerLen);
+  file.close();
+  if (empty) return true;
+  if (read == static_cast<int>(headerLen) && memcmp(header, LOG_HEADER, headerLen) == 0) return true;
+
+  char archivePath[40];
+  for (unsigned index = 0; index < MAX_ARCHIVES; ++index) {
+    if (index == 0) {
+      snprintf(archivePath, sizeof(archivePath), "%s", ARCHIVE_PATH);
+    } else {
+      snprintf(archivePath, sizeof(archivePath), ARCHIVE_PATH_PATTERN, index);
+    }
+    if (Storage.exists(archivePath)) continue;
+    if (!Storage.rename(LOG_PATH, archivePath)) {
+      LOG_ERR("SESSION", "Failed to move old log to %s", archivePath);
+      return false;
+    }
+    LOG_INF("SESSION", "Old-format log kept as %s", archivePath);
+    return true;
+  }
+  LOG_ERR("SESSION", "No free name to keep the old log; not appending");
+  return false;
+}
+
 }  // namespace
 
-void append(const ReadingStatsDateTime* sessionStart, const uint32_t activeSeconds, const std::string& title,
-            const std::string& path) {
+void append(const ReadingStatsDateTime* sessionStart, const uint32_t activeSeconds, const uint32_t elapsedSeconds,
+            const std::string& title, const std::string& path) {
   if (activeSeconds < MIN_LOGGED_SECONDS) return;
+  if (!prepareLogSchema()) return;
 
   HalFile file = Storage.open(LOG_PATH, O_WRONLY | O_CREAT | O_APPEND);
   if (!file) {
@@ -91,6 +133,8 @@ void append(const ReadingStatsDateTime* sessionStart, const uint32_t activeSecon
   row += end;
   row += ',';
   row += std::to_string(activeSeconds);
+  row += ',';
+  if (elapsedSeconds != ELAPSED_UNKNOWN) row += std::to_string(elapsedSeconds);
   row += ',';
   row += csvField(title);
   row += ',';

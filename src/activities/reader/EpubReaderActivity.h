@@ -187,6 +187,7 @@ class EpubReaderActivity final : public Activity {
   // action; the logged time is CrossInk's reading time between start and stop.
   bool sessionLogActive = false;
   uint32_t sessionLogBaselineSeconds = 0;
+  unsigned long sessionLogStartMs = 0;
   ReadingStatsDateTime sessionLogStartLocalDateTime;
   bool hasSessionLogStartLocalDateTime = false;
   void syncStatsTrackingState();
