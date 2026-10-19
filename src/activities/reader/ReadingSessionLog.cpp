@@ -154,7 +154,7 @@ std::string formatListTime(const std::string& iso) {
   if (sscanf(iso.c_str(), "%4u-%2u-%2uT%2u:%2u", &year, &month, &day, &hour, &minute) != 5) return "No time";
   const unsigned hour12 = hour % 12 == 0 ? 12 : hour % 12;
   char buf[24];
-  snprintf(buf, sizeof(buf), "%u/%u %u:%02u %s", month, day, hour12, minute, hour < 12 ? "a" : "p");
+  snprintf(buf, sizeof(buf), "%u/%u %u:%02u%s", month, day, hour12, minute, hour < 12 ? "a" : "p");
   return buf;
 }
 
@@ -171,24 +171,13 @@ std::string formatListDuration(const uint32_t seconds) {
   return buf;
 }
 
-// Shortens to at most maxChars characters (UTF-8 aware) and adds "..." if cut.
-std::string shortenTitle(const std::string& title, const size_t maxChars) {
-  size_t chars = 0;
-  for (size_t i = 0; i < title.size(); ++i) {
-    if ((static_cast<unsigned char>(title[i]) & 0xC0) == 0x80) continue;  // UTF-8 continuation byte
-    if (chars == maxChars) return title.substr(0, i) + "...";
-    ++chars;
-  }
-  return title;
-}
-
-std::string labelForRow(const std::string& line) {
+RecentEntry entryForRow(const std::string& line) {
   const std::vector<std::string> f = splitCsv(line);
-  if (f.size() < 6) return shortenTitle(line, 30);
+  if (f.size() < 6) return {line, "", line};
   // Prefer clock time (elapsed); fall back to active time when it's empty.
   const std::string& durationText = !f[3].empty() ? f[3] : f[2];
   const uint32_t seconds = static_cast<uint32_t>(strtoul(durationText.c_str(), nullptr, 10));
-  return formatListTime(f[0]) + " | " + formatListDuration(seconds) + " | " + shortenTitle(f[4], 20);
+  return {line, formatListTime(f[0]) + " | " + formatListDuration(seconds) + " | ", f[4]};
 }
 
 bool appendToDeletedLog(const std::string& line) {
@@ -281,7 +270,7 @@ std::vector<RecentEntry> loadRecent(const size_t maxCount) {
   });
 
   for (auto it = recent.rbegin(); it != recent.rend(); ++it) {
-    result.push_back({*it, labelForRow(*it)});
+    result.push_back(entryForRow(*it));
   }
   return result;
 }

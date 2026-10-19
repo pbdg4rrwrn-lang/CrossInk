@@ -40,8 +40,10 @@ void append(const ReadingStatsDateTime* sessionStart, uint32_t activeSeconds, ui
 
 // One logged session as shown in the "Recent Sessions" list.
 struct RecentEntry {
-  std::string line;   // the exact CSV row, used to find it again when deleting
-  std::string label;  // short text for the list, e.g. "10/19 4:01 PM - 35 min - Gardens of the..."
+  std::string line;    // the exact CSV row, used to find it again when deleting
+  std::string prefix;  // time and duration, e.g. "10/19 4:01p | 35m | "
+  std::string title;   // full book title; the reader shortens it to fit the screen
+  std::string label() const { return prefix + title; }
 };
 
 // Up to maxCount most recent sessions, newest first.

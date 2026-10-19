@@ -313,6 +313,21 @@ class OptionPopup {
 
   bool isActive() const { return active; }
 
+  // Widest option text guaranteed to fit inside the selection highlight at the
+  // popup's maximum width, leaving room for a scrollbar in case the list scrolls.
+  static int maxOptionTextWidth(const GfxRenderer& renderer) {
+    const auto& metrics = UITheme::getInstance().getMetrics();
+    const int maxDialogW = renderer.getScreenWidth() - metrics.optionPopupDialogSideMargin * 2;
+    const int scrollBarGutter =
+        metrics.scrollBarWidth + metrics.scrollBarRightOffset + metrics.optionPopupSelectionHPadding;
+    return std::max(1, maxDialogW - metrics.optionPopupInnerPadding * 2 - scrollBarGutter -
+                           metrics.optionPopupSelectionHPadding * 2);
+  }
+  static int optionFontId() { return uiScaleSpec().bodyFontId; }
+  static EpdFontFamily::Style optionFontStyle() {
+    return UITheme::getInstance().getMetrics().optionPopupOptionFontBold ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR;
+  }
+
   void dismiss(MappedInputManager& input, const std::function<void()>& requestUpdate) {
     if (active) cancel(input, requestUpdate, false);
   }

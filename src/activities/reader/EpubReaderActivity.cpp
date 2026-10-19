@@ -5768,7 +5768,16 @@ void EpubReaderActivity::openRecentSessions() {
   if (recentSessions.empty()) {
     labels.emplace_back(tr(STR_NO_SESSIONS_LOGGED));
   }
-  for (const auto& entry : recentSessions) labels.push_back(entry.label);
+  // Give the title whatever width the time and duration leave, so every label
+  // fits inside the highlight however long its time and duration are.
+  const int fontId = OptionPopup::optionFontId();
+  const auto style = OptionPopup::optionFontStyle();
+  const int maxWidth = OptionPopup::maxOptionTextWidth(renderer);
+  for (const auto& entry : recentSessions) {
+    const int prefixWidth = renderer.getTextWidth(fontId, entry.prefix.c_str(), style);
+    const int titleWidth = std::max(1, maxWidth - prefixWidth);
+    labels.push_back(entry.prefix + renderer.truncatedText(fontId, entry.title.c_str(), titleWidth, style));
+  }
 
   quickActionsPopup.show(tr(STR_RECENT_SESSIONS), labels, 0, [this](const int index) {
     if (index >= 0 && index < static_cast<int>(recentSessions.size())) {
@@ -5788,7 +5797,8 @@ void EpubReaderActivity::openSessionDeleteConfirm() {
   if (index < 0 || index >= static_cast<int>(recentSessions.size())) return;
 
   const std::vector<std::string> options = {tr(STR_DELETE_SESSION), tr(STR_CANCEL)};
-  quickActionsPopup.show(recentSessions[index].label.c_str(), options, 1, [this, index](const int choice) {
+  const std::string confirmTitle = recentSessions[index].label();
+  quickActionsPopup.show(confirmTitle.c_str(), options, 1, [this, index](const int choice) {
     mappedInput.setReaderTouchscreenOverride(false);
     if (choice == 0 && index < static_cast<int>(recentSessions.size())) {
       ReadingSessionLog::deleteEntry(recentSessions[index].line);
