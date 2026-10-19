@@ -23,6 +23,7 @@
 #include "MappedInputManager.h"
 #include "QuickActions.h"
 #include "ReaderUtils.h"
+#include "ReadingSessionLog.h"
 #include "ReadingSessionStats.h"
 #include "RecentBooksStore.h"
 #include "XtcReaderChapterSelectionActivity.h"
@@ -693,7 +694,7 @@ bool XtcReaderActivity::currentPageReadingSecondsForStats(uint32_t& seconds, con
   }
 
   const uint32_t thresholdSeconds = SETTINGS.getReadingIdleTimeThresholdSeconds();
-  if (elapsedSeconds > thresholdSeconds) {
+  if (ReadingSessionLog::APPLY_IDLE_THRESHOLD_TO_SESSIONS && elapsedSeconds > thresholdSeconds) {
     return false;
   }
 
@@ -769,6 +770,8 @@ void XtcReaderActivity::commitReadingStats() {
   }
   if (statsTrackingActive) {
     recordCurrentPageReadingTime("session_commit");
+    ReadingSessionLog::append(hasSessionStartLocalDateTime ? &sessionStartLocalDateTime : nullptr,
+                              sessionReadingSeconds, xtc->getTitle(), xtc->getPath());
     commitReadingSession(stats, globalStats, sessionReadingSeconds,
                          hasSessionStartLocalDateTime ? &sessionStartLocalDateTime : nullptr);
   }

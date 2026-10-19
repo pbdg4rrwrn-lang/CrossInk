@@ -56,6 +56,7 @@
 #include "QuickActions.h"
 #include "ReaderFontLoading.h"
 #include "ReaderUtils.h"
+#include "ReadingSessionLog.h"
 #include "ReadingSessionStats.h"
 #include "RecentBooksStore.h"
 #include "SdCardFontSystem.h"
@@ -1526,6 +1527,10 @@ void EpubReaderActivity::pauseReadingPaceTimer(const char* reason) {
 void EpubReaderActivity::commitReadingStatsSession() {
   if (!statsTrackingActive) return;
   recordCurrentPageReadingTime("session_commit");
+  if (epub) {
+    ReadingSessionLog::append(hasSessionStartLocalDateTime ? &sessionStartLocalDateTime : nullptr,
+                              sessionReadingSeconds, epub->getTitle(), epub->getPath());
+  }
   commitReadingSession(stats, globalStats, sessionReadingSeconds,
                        hasSessionStartLocalDateTime ? &sessionStartLocalDateTime : nullptr);
   sessionReadingSeconds = 0;
@@ -1654,7 +1659,7 @@ bool EpubReaderActivity::currentPageReadingSecondsForStats(uint32_t& seconds, co
   }
 
   const uint32_t thresholdSeconds = SETTINGS.getReadingIdleTimeThresholdSeconds();
-  if (elapsedSeconds > thresholdSeconds) {
+  if (ReadingSessionLog::APPLY_IDLE_THRESHOLD_TO_SESSIONS && elapsedSeconds > thresholdSeconds) {
     return false;
   }
 
