@@ -285,6 +285,8 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
     HOME_READER = 36,
     // Fork: start/stop the manual reading session log (ReadingSessionLog).
     TOGGLE_SESSION_LOG = 37,
+    // Fork: list recent logged sessions, with delete.
+    SHOW_RECENT_SESSIONS = 38,
     SHORT_PWRBTN_COUNT
   };
 

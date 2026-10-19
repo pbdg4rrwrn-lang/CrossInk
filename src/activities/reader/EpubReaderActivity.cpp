@@ -2834,6 +2834,10 @@ void EpubReaderActivity::loop() {
     cancelSilentPrefetchForInput();
   }
 
+  if (pendingSessionDeleteIndex >= 0 && !quickActionsPopup.isActive()) {
+    openSessionDeleteConfirm();
+    return;
+  }
   if (quickActionsPopup.handleInput(mappedInput, [this] { requestUpdate(); })) return;
   if (!epub) {
     // Should never happen
@@ -5215,6 +5219,9 @@ bool EpubReaderActivity::handleShortcutAction(const uint8_t rawAction) {
     case CrossPointSettings::SHORT_PWRBTN::TOGGLE_SESSION_LOG:
       toggleSessionLog();
       return true;
+    case CrossPointSettings::SHORT_PWRBTN::SHOW_RECENT_SESSIONS:
+      openRecentSessions();
+      return true;
     case CrossPointSettings::SHORT_PWRBTN::HOME_READER:
       return dispatchShortcutAction(action);
     case CrossPointSettings::SHORT_PWRBTN::LIBRARY:
@@ -5310,6 +5317,9 @@ bool EpubReaderActivity::handleShortcutAction(const CrossPointSettings::SHORT_PW
       return true;
     case CrossPointSettings::SHORT_PWRBTN::TOGGLE_SESSION_LOG:
       toggleSessionLog();
+      return true;
+    case CrossPointSettings::SHORT_PWRBTN::SHOW_RECENT_SESSIONS:
+      openRecentSessions();
       return true;
     case CrossPointSettings::SHORT_PWRBTN::LIBRARY:
       return handleGlobalPowerButtonAction(action);
@@ -5517,6 +5527,9 @@ bool EpubReaderActivity::executeShortPowerButtonAction() {
     case CrossPointSettings::SHORT_PWRBTN::TOGGLE_SESSION_LOG:
       toggleSessionLog();
       return true;
+    case CrossPointSettings::SHORT_PWRBTN::SHOW_RECENT_SESSIONS:
+      openRecentSessions();
+      return true;
     case CrossPointSettings::SHORT_PWRBTN::LIBRARY:
       return handleGlobalPowerButtonAction(static_cast<CrossPointSettings::SHORT_PWRBTN>(SETTINGS.shortPwrBtn));
     case CrossPointSettings::SHORT_PWRBTN::TOGGLE_FRONTLIGHT:
@@ -5636,6 +5649,9 @@ bool EpubReaderActivity::executeLongPowerButtonAction() {
     case CrossPointSettings::SHORT_PWRBTN::TOGGLE_SESSION_LOG:
       toggleSessionLog();
       return true;
+    case CrossPointSettings::SHORT_PWRBTN::SHOW_RECENT_SESSIONS:
+      openRecentSessions();
+      return true;
     case CrossPointSettings::SHORT_PWRBTN::LIBRARY:
       return handleGlobalPowerButtonAction(static_cast<CrossPointSettings::SHORT_PWRBTN>(SETTINGS.longPwrBtn));
     default:
@@ -5741,6 +5757,49 @@ void EpubReaderActivity::toggleSessionLog() {
   } else {
     startSessionLog();
   }
+  requestUpdate();
+}
+
+void EpubReaderActivity::openRecentSessions() {
+  clearPendingManualPageTurns();
+  constexpr size_t RECENT_SESSION_COUNT = 10;
+  recentSessions = ReadingSessionLog::loadRecent(RECENT_SESSION_COUNT);
+  std::vector<std::string> labels;
+  if (recentSessions.empty()) {
+    labels.emplace_back(tr(STR_NO_SESSIONS_LOGGED));
+  }
+  for (const auto& entry : recentSessions) labels.push_back(entry.label);
+
+  quickActionsPopup.show(tr(STR_RECENT_SESSIONS), labels, 0, [this](const int index) {
+    if (index >= 0 && index < static_cast<int>(recentSessions.size())) {
+      pendingSessionDeleteIndex = index;
+    } else {
+      mappedInput.setReaderTouchscreenOverride(false);
+    }
+  });
+  mappedInput.setReaderTouchscreenOverride(true);
+  quickActionsPopup.setCancelCallback([this] { mappedInput.setReaderTouchscreenOverride(false); });
+  requestUpdate();
+}
+
+void EpubReaderActivity::openSessionDeleteConfirm() {
+  const int index = pendingSessionDeleteIndex;
+  pendingSessionDeleteIndex = -1;
+  if (index < 0 || index >= static_cast<int>(recentSessions.size())) return;
+
+  const std::vector<std::string> options = {tr(STR_DELETE_SESSION), tr(STR_CANCEL)};
+  quickActionsPopup.show(recentSessions[index].label.c_str(), options, 1, [this, index](const int choice) {
+    mappedInput.setReaderTouchscreenOverride(false);
+    if (choice == 0 && index < static_cast<int>(recentSessions.size())) {
+      ReadingSessionLog::deleteEntry(recentSessions[index].line);
+    }
+    recentSessions.clear();
+  });
+  mappedInput.setReaderTouchscreenOverride(true);
+  quickActionsPopup.setCancelCallback([this] {
+    mappedInput.setReaderTouchscreenOverride(false);
+    recentSessions.clear();
+  });
   requestUpdate();
 }
 

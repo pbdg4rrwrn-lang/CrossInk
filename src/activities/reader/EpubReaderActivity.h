@@ -21,6 +21,7 @@
 #include "GlobalReadingStats.h"
 #include "ManualPageTurnQueue.h"
 #include "ReaderProgressSaveDebouncer.h"
+#include "ReadingSessionLog.h"
 #include "SideButtonShortcuts.h"
 #include "activities/Activity.h"
 #include "activities/reader/TouchReaderPreviewModel.h"
@@ -188,6 +189,10 @@ class EpubReaderActivity final : public Activity {
   bool sessionLogActive = false;
   uint32_t sessionLogBaselineSeconds = 0;
   unsigned long sessionLogStartMs = 0;
+  // Recent Sessions list (fork). The confirm popup opens on the next loop pass,
+  // after the list popup has fully closed.
+  std::vector<ReadingSessionLog::RecentEntry> recentSessions;
+  int pendingSessionDeleteIndex = -1;
   ReadingStatsDateTime sessionLogStartLocalDateTime;
   bool hasSessionLogStartLocalDateTime = false;
   void syncStatsTrackingState();
@@ -483,6 +488,8 @@ class EpubReaderActivity final : public Activity {
   void stopSessionLog();
   void toggleSessionLog();
   bool shouldShowSessionLogPaused() const;
+  void openRecentSessions();
+  void openSessionDeleteConfirm();
   void showRenderModeToast(uint8_t renderMode);
   void showSafeModeToast();
   bool storeRenderModeToastRegion(const char* msg);

@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 
 #include "CrossPointSettings.h"
 
@@ -17,6 +18,9 @@ constexpr char LOG_HEADER[] = "start,end,active_seconds,elapsed_seconds,title,pa
 constexpr char ARCHIVE_PATH[] = "/reading_sessions_v1.csv";
 constexpr char ARCHIVE_PATH_PATTERN[] = "/reading_sessions_v1_%u.csv";
 constexpr unsigned MAX_ARCHIVES = 100;
+constexpr char DELETED_PATH[] = "/reading_sessions_deleted.csv";
+constexpr char TMP_PATH[] = "/reading_sessions.csv.tmp";
+constexpr char BAK_PATH[] = "/reading_sessions.csv.bak";
 
 // Runaway guard so a bug can never fill the card. A row is ~150 bytes, so this
 // holds roughly 13,000 sessions (years of reading).
@@ -94,6 +98,113 @@ bool prepareLogSchema() {
   return false;
 }
 
+// Calls onLine(line) for every line of the file at `path` (without the newline),
+// reading in small chunks so a large log never needs much memory.
+template <typename Fn>
+bool forEachLine(const char* path, Fn onLine) {
+  HalFile file = Storage.open(path, O_RDONLY);
+  if (!file) return false;
+  char buf[256];
+  std::string current;
+  int n = 0;
+  while ((n = file.read(buf, sizeof(buf))) > 0) {
+    for (int i = 0; i < n; ++i) {
+      if (buf[i] == '\n') {
+        onLine(current);
+        current.clear();
+      } else if (buf[i] != '\r') {
+        current += buf[i];
+      }
+    }
+  }
+  if (!current.empty()) onLine(current);
+  file.close();
+  return true;
+}
+
+// Splits one CSV row into fields, honouring "quoted, fields" and "" escapes.
+std::vector<std::string> splitCsv(const std::string& line) {
+  std::vector<std::string> fields(1);
+  bool quoted = false;
+  for (size_t i = 0; i < line.size(); ++i) {
+    const char c = line[i];
+    if (quoted) {
+      if (c == '"' && i + 1 < line.size() && line[i + 1] == '"') {
+        fields.back() += '"';
+        ++i;
+      } else if (c == '"') {
+        quoted = false;
+      } else {
+        fields.back() += c;
+      }
+    } else if (c == '"') {
+      quoted = true;
+    } else if (c == ',') {
+      fields.emplace_back();
+    } else {
+      fields.back() += c;
+    }
+  }
+  return fields;
+}
+
+// "2026-10-19T16:01-05:00" -> "10/19 4:01 PM"; empty or malformed -> "No time".
+std::string formatListTime(const std::string& iso) {
+  unsigned year = 0, month = 0, day = 0, hour = 0, minute = 0;
+  if (sscanf(iso.c_str(), "%4u-%2u-%2uT%2u:%2u", &year, &month, &day, &hour, &minute) != 5) return "No time";
+  const unsigned hour12 = hour % 12 == 0 ? 12 : hour % 12;
+  char buf[24];
+  snprintf(buf, sizeof(buf), "%u/%u %u:%02u %s", month, day, hour12, minute, hour < 12 ? "a" : "p");
+  return buf;
+}
+
+std::string formatListDuration(const uint32_t seconds) {
+  char buf[24];
+  if (seconds < 60) {
+    snprintf(buf, sizeof(buf), "%us", static_cast<unsigned>(seconds));
+  } else if (seconds < 3600) {
+    snprintf(buf, sizeof(buf), "%um", static_cast<unsigned>((seconds + 30) / 60));
+  } else {
+    const unsigned minutes = static_cast<unsigned>((seconds + 30) / 60);
+    snprintf(buf, sizeof(buf), "%uh %um", minutes / 60, minutes % 60);
+  }
+  return buf;
+}
+
+// Shortens to at most maxChars characters (UTF-8 aware) and adds "..." if cut.
+std::string shortenTitle(const std::string& title, const size_t maxChars) {
+  size_t chars = 0;
+  for (size_t i = 0; i < title.size(); ++i) {
+    if ((static_cast<unsigned char>(title[i]) & 0xC0) == 0x80) continue;  // UTF-8 continuation byte
+    if (chars == maxChars) return title.substr(0, i) + "...";
+    ++chars;
+  }
+  return title;
+}
+
+std::string labelForRow(const std::string& line) {
+  const std::vector<std::string> f = splitCsv(line);
+  if (f.size() < 6) return shortenTitle(line, 30);
+  // Prefer clock time (elapsed); fall back to active time when it's empty.
+  const std::string& durationText = !f[3].empty() ? f[3] : f[2];
+  const uint32_t seconds = static_cast<uint32_t>(strtoul(durationText.c_str(), nullptr, 10));
+  return formatListTime(f[0]) + " | " + formatListDuration(seconds) + " | " + shortenTitle(f[4], 20);
+}
+
+bool appendToDeletedLog(const std::string& line) {
+  HalFile file = Storage.open(DELETED_PATH, O_WRONLY | O_CREAT | O_APPEND);
+  if (!file) return false;
+  bool ok = true;
+  if (file.size() == 0) {
+    constexpr size_t headerLen = sizeof(LOG_HEADER) - 1;
+    ok = file.write(LOG_HEADER, headerLen) == headerLen;
+  }
+  const std::string row = line + "\n";
+  if (ok) ok = file.write(row.c_str(), row.size()) == row.size();
+  file.close();
+  return ok;
+}
+
 }  // namespace
 
 void append(const ReadingStatsDateTime* sessionStart, const uint32_t activeSeconds, const uint32_t elapsedSeconds,
@@ -151,6 +262,77 @@ void append(const ReadingStatsDateTime* sessionStart, const uint32_t activeSecon
   } else {
     LOG_ERR("SESSION", "Failed to write session row to %s", LOG_PATH);
   }
+}
+
+std::vector<RecentEntry> loadRecent(const size_t maxCount) {
+  std::vector<RecentEntry> result;
+  if (maxCount == 0 || !prepareLogSchema() || !Storage.exists(LOG_PATH)) return result;
+
+  std::deque<std::string> recent;
+  bool header = true;
+  forEachLine(LOG_PATH, [&](const std::string& line) {
+    if (header) {
+      header = false;
+      return;
+    }
+    if (line.empty()) return;
+    recent.push_back(line);
+    if (recent.size() > maxCount) recent.pop_front();
+  });
+
+  for (auto it = recent.rbegin(); it != recent.rend(); ++it) {
+    result.push_back({*it, labelForRow(*it)});
+  }
+  return result;
+}
+
+bool deleteEntry(const std::string& line) {
+  if (line.empty() || !Storage.exists(LOG_PATH)) return false;
+  if (Storage.exists(TMP_PATH)) Storage.remove(TMP_PATH);
+
+  HalFile out = Storage.open(TMP_PATH, O_WRONLY | O_CREAT | O_TRUNC);
+  if (!out) {
+    LOG_ERR("SESSION", "Failed to open %s", TMP_PATH);
+    return false;
+  }
+  // Copy every line except the first exact match. Identical rows are the same
+  // session, so removing any one of them is equivalent.
+  bool removed = false;
+  bool writeOk = true;
+  const bool readOk = forEachLine(LOG_PATH, [&](const std::string& current) {
+    if (!removed && current == line) {
+      removed = true;
+      return;
+    }
+    const std::string row = current + "\n";
+    if (out.write(row.c_str(), row.size()) != row.size()) writeOk = false;
+  });
+  out.close();
+
+  const bool ok = readOk && writeOk;
+  if (!ok || !removed) {
+    Storage.remove(TMP_PATH);
+    LOG_ERR("SESSION", removed ? "Failed to rewrite session log" : "Session to delete not found");
+    return false;
+  }
+
+  // Swap files with a backup step, so a power cut can't leave no log at all.
+  if (Storage.exists(BAK_PATH)) Storage.remove(BAK_PATH);
+  if (!Storage.rename(LOG_PATH, BAK_PATH)) {
+    Storage.remove(TMP_PATH);
+    LOG_ERR("SESSION", "Failed to back up session log before delete");
+    return false;
+  }
+  if (!Storage.rename(TMP_PATH, LOG_PATH)) {
+    Storage.rename(BAK_PATH, LOG_PATH);
+    LOG_ERR("SESSION", "Failed to replace session log; restored backup");
+    return false;
+  }
+  Storage.remove(BAK_PATH);
+
+  if (!appendToDeletedLog(line)) LOG_ERR("SESSION", "Deleted, but failed to copy row to %s", DELETED_PATH);
+  LOG_INF("SESSION", "Deleted session row");
+  return true;
 }
 
 }  // namespace ReadingSessionLog

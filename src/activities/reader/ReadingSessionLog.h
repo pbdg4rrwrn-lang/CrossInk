@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #include "ReadingStatsUtils.h"
 
@@ -36,5 +37,18 @@ constexpr bool APPLY_IDLE_THRESHOLD_TO_SESSIONS = false;
 
 void append(const ReadingStatsDateTime* sessionStart, uint32_t activeSeconds, uint32_t elapsedSeconds,
             const std::string& title, const std::string& path);
+
+// One logged session as shown in the "Recent Sessions" list.
+struct RecentEntry {
+  std::string line;   // the exact CSV row, used to find it again when deleting
+  std::string label;  // short text for the list, e.g. "10/19 4:01 PM - 35 min - Gardens of the..."
+};
+
+// Up to maxCount most recent sessions, newest first.
+std::vector<RecentEntry> loadRecent(size_t maxCount);
+
+// Removes one row equal to `line` from the log and appends it to
+// /reading_sessions_deleted.csv, so a mistaken delete can be undone by hand.
+bool deleteEntry(const std::string& line);
 
 }  // namespace ReadingSessionLog
