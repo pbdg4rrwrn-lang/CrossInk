@@ -877,6 +877,23 @@ void drawToastBuffer(const GfxRenderer& renderer, const char* msg) {
   renderer.drawText(UI_10_FONT_ID, toast.x + toastPadX, toast.y + toastPadY, msg, !toastBackgroundBlack);
 }
 
+// Fork: boxed "PAUSED" in the middle of the page while the manual session log
+// is off, so it's obvious reading time isn't being recorded.
+void drawSessionLogPausedBuffer(const GfxRenderer& renderer) {
+  constexpr int padX = 28;
+  constexpr int padY = 16;
+  const char* msg = tr(STR_SESSION_LOG_PAUSED);
+  const bool boxBlack = ReaderUtils::readerForegroundBlack();
+  const int textW = renderer.getTextWidth(UI_12_FONT_ID, msg, EpdFontFamily::BOLD);
+  const int textH = renderer.getLineHeight(UI_12_FONT_ID);
+  const int w = textW + padX * 2;
+  const int h = textH + padY * 2;
+  const int x = (renderer.getScreenWidth() - w) / 2;
+  const int y = (renderer.getScreenHeight() - h) / 2;
+  renderer.fillRect(x, y, w, h, boxBlack);
+  renderer.drawText(UI_12_FONT_ID, x + padX, y + padY, msg, !boxBlack, EpdFontFamily::BOLD);
+}
+
 void drawToast(const GfxRenderer& renderer, const char* msg) {
   drawToastBuffer(renderer, msg);
   renderer.displayBuffer();
@@ -1527,10 +1544,8 @@ void EpubReaderActivity::pauseReadingPaceTimer(const char* reason) {
 void EpubReaderActivity::commitReadingStatsSession() {
   if (!statsTrackingActive) return;
   recordCurrentPageReadingTime("session_commit");
-  if (epub) {
-    ReadingSessionLog::append(hasSessionStartLocalDateTime ? &sessionStartLocalDateTime : nullptr,
-                              sessionReadingSeconds, epub->getTitle(), epub->getPath());
-  }
+  // Leaving the book (Home, sleep, stats off) ends a running manual log.
+  stopSessionLog();
   commitReadingSession(stats, globalStats, sessionReadingSeconds,
                        hasSessionStartLocalDateTime ? &sessionStartLocalDateTime : nullptr);
   sessionReadingSeconds = 0;
@@ -4994,6 +5009,7 @@ void EpubReaderActivity::resetReadingPaceData() {
 void EpubReaderActivity::resetCurrentBookStatsAfterDelete() {
   stats = BookReadingStats{};
   sessionReadingSeconds = 0;
+  sessionLogBaselineSeconds = 0;
   sessionPaceSampleSeconds = 0;
   sessionPaceSampleCount = 0;
   pendingReadFolderMove = false;
@@ -5196,6 +5212,9 @@ bool EpubReaderActivity::handleShortcutAction(const uint8_t rawAction) {
     case CrossPointSettings::SHORT_PWRBTN::QUICK_ACTIONS:
       openQuickActionsPopup();
       return true;
+    case CrossPointSettings::SHORT_PWRBTN::TOGGLE_SESSION_LOG:
+      toggleSessionLog();
+      return true;
     case CrossPointSettings::SHORT_PWRBTN::HOME_READER:
       return dispatchShortcutAction(action);
     case CrossPointSettings::SHORT_PWRBTN::LIBRARY:
@@ -5288,6 +5307,9 @@ bool EpubReaderActivity::handleShortcutAction(const CrossPointSettings::SHORT_PW
       return true;
     case CrossPointSettings::SHORT_PWRBTN::QUICK_ACTIONS:
       openQuickActionsPopup();
+      return true;
+    case CrossPointSettings::SHORT_PWRBTN::TOGGLE_SESSION_LOG:
+      toggleSessionLog();
       return true;
     case CrossPointSettings::SHORT_PWRBTN::LIBRARY:
       return handleGlobalPowerButtonAction(action);
@@ -5492,6 +5514,9 @@ bool EpubReaderActivity::executeShortPowerButtonAction() {
     case CrossPointSettings::SHORT_PWRBTN::QUICK_ACTIONS:
       openQuickActionsPopup();
       return true;
+    case CrossPointSettings::SHORT_PWRBTN::TOGGLE_SESSION_LOG:
+      toggleSessionLog();
+      return true;
     case CrossPointSettings::SHORT_PWRBTN::LIBRARY:
       return handleGlobalPowerButtonAction(static_cast<CrossPointSettings::SHORT_PWRBTN>(SETTINGS.shortPwrBtn));
     case CrossPointSettings::SHORT_PWRBTN::TOGGLE_FRONTLIGHT:
@@ -5608,6 +5633,9 @@ bool EpubReaderActivity::executeLongPowerButtonAction() {
     case CrossPointSettings::SHORT_PWRBTN::QUICK_ACTIONS:
       openQuickActionsPopup();
       return true;
+    case CrossPointSettings::SHORT_PWRBTN::TOGGLE_SESSION_LOG:
+      toggleSessionLog();
+      return true;
     case CrossPointSettings::SHORT_PWRBTN::LIBRARY:
       return handleGlobalPowerButtonAction(static_cast<CrossPointSettings::SHORT_PWRBTN>(SETTINGS.longPwrBtn));
     default:
@@ -5671,6 +5699,49 @@ void EpubReaderActivity::showTiltPageTurnFeedback(bool enabled) {
   pendingTiltPageTurnFeedback = true;
   tiltPageTurnFeedbackShowTime = millis();
 }
+
+// Reading time so far in this book session, including the page on screen now.
+uint32_t EpubReaderActivity::liveSessionReadingSeconds() const {
+  uint32_t currentPageSeconds = 0;
+  currentPageReadingSecondsForStats(currentPageSeconds, "session_log");
+  return sessionReadingSeconds > UINT32_MAX - currentPageSeconds ? UINT32_MAX
+                                                                 : sessionReadingSeconds + currentPageSeconds;
+}
+
+void EpubReaderActivity::startSessionLog() {
+  if (sessionLogActive || !statsTrackingActive) return;
+  sessionLogActive = true;
+  sessionLogBaselineSeconds = liveSessionReadingSeconds();
+  hasSessionLogStartLocalDateTime = getCurrentLocalReadingStatsDateTime(sessionLogStartLocalDateTime);
+  LOG_INF("SESSION", "Manual log started");
+}
+
+void EpubReaderActivity::stopSessionLog() {
+  if (!sessionLogActive) return;
+  sessionLogActive = false;
+  const uint32_t live = liveSessionReadingSeconds();
+  const uint32_t loggedSeconds = live > sessionLogBaselineSeconds ? live - sessionLogBaselineSeconds : 0;
+  LOG_INF("SESSION", "Manual log stopped: %u s", static_cast<unsigned>(loggedSeconds));
+  if (epub) {
+    ReadingSessionLog::append(hasSessionLogStartLocalDateTime ? &sessionLogStartLocalDateTime : nullptr, loggedSeconds,
+                              epub->getTitle(), epub->getPath());
+  }
+}
+
+void EpubReaderActivity::toggleSessionLog() {
+  // Bank the time already spent on this page and restart the page timer, so the
+  // redraw below (which restarts it too) can't throw that time away.
+  recordCurrentPageReadingTime("session_log_toggle");
+  resumeReadingPaceTimer("session_log_toggle");
+  if (sessionLogActive) {
+    stopSessionLog();
+  } else {
+    startSessionLog();
+  }
+  requestUpdate();
+}
+
+bool EpubReaderActivity::shouldShowSessionLogPaused() const { return statsTrackingActive && !sessionLogActive; }
 
 void EpubReaderActivity::toggleHomeButtonInReader() {
   if (!gpio.hasHomeKey()) return;
@@ -7329,6 +7400,12 @@ bool EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int fo
   if (deferImageLoading) {
     needsImageGrayscale = false;
   }
+  // The PAUSED box is drawn into the black/white buffer only. Skip the grayscale
+  // smoothing pass while it shows, or the page text bleeds through it.
+  if (shouldShowSessionLogPaused()) {
+    needsTextGrayscale = false;
+    needsImageGrayscale = false;
+  }
   const bool pageHasImagesNeedingDecode = !deferImageLoading && pageHasImages && page->hasImagesNeedingDecode();
 
   const auto finalizeBufferComposition = [&]() {
@@ -7378,6 +7455,9 @@ bool EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int fo
   }
   composePageBuffer();
   renderStatusBar();
+  if (shouldShowSessionLogPaused()) {
+    drawSessionLogPausedBuffer(renderer);
+  }
   if (pendingBookmarkFeedback) {
     const char* msg = tr(STR_BOOKMARK_ADDED);
     switch (bookmarkFeedbackType) {

@@ -61,8 +61,9 @@ inline constexpr std::array<StrId, CrossPointSettings::QUICK_ACTION_SLOT_ACTION_
 
 // Shared display order for shortcut pickers. The values remain the persisted
 // SHORT_PWRBTN IDs; only their presentation order is centralized here.
-inline constexpr std::array<CrossPointSettings::SHORT_PWRBTN, 32> shortcutActionOrder = {
+inline constexpr std::array<CrossPointSettings::SHORT_PWRBTN, 33> shortcutActionOrder = {
     CrossPointSettings::IGNORE,
+    CrossPointSettings::TOGGLE_SESSION_LOG,
     CrossPointSettings::SLEEP,
     CrossPointSettings::PAGE_TURN,
     CrossPointSettings::PREVIOUS_PAGE,
@@ -107,6 +108,8 @@ inline bool isActionAvailable(const uint8_t action) {
   if (action == CrossPointSettings::TOGGLE_FRONTLIGHT) return Frontlight.present();
   if (action == CrossPointSettings::TOGGLE_TOUCHSCREEN) return gpio.hasTouch();
   if (action == CrossPointSettings::HOME_READER) return !gpio.hasTouch();
+  // Session time comes from reading stats, so logging needs stats tracking on.
+  if (action == CrossPointSettings::TOGGLE_SESSION_LOG) return SETTINGS.shouldTrackReadingStats();
   if (action < CrossPointSettings::QUICK_ACTION_SLOT_ACTION_COUNT) {
     return action != CrossPointSettings::TOGGLE_TILT_PAGE_TURN || supportsTiltPageTurn();
   }
@@ -132,6 +135,7 @@ inline StrId actionLabel(const uint8_t action) {
   if (action == CrossPointSettings::NEARBY_POSITION_SYNC) return StrId::STR_NEARBY_POSITION_SYNC;
   if (action == CrossPointSettings::LIBRARY) return StrId::STR_LIBRARY;
   if (action == CrossPointSettings::HOME_READER) return StrId::STR_HOME_READER;
+  if (action == CrossPointSettings::TOGGLE_SESSION_LOG) return StrId::STR_TOGGLE_SESSION_LOG;
   return StrId::STR_HOME_BUTTON_LOCK;
 }
 

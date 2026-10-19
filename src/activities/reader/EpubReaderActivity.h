@@ -183,6 +183,12 @@ class EpubReaderActivity final : public Activity {
   bool pendingStatsCommit = false;
   ReadingStatsDateTime sessionStartLocalDateTime;
   bool hasSessionStartLocalDateTime = false;
+  // Manual session log (fork). Off until started with the Start/Stop Session Log
+  // action; the logged time is CrossInk's reading time between start and stop.
+  bool sessionLogActive = false;
+  uint32_t sessionLogBaselineSeconds = 0;
+  ReadingStatsDateTime sessionLogStartLocalDateTime;
+  bool hasSessionLogStartLocalDateTime = false;
   void syncStatsTrackingState();
   void commitReadingStatsSession();
   void finalizeReadingStatsOnExit();
@@ -471,6 +477,11 @@ class EpubReaderActivity final : public Activity {
   // Shared dismissal rule for the transient bookmark/completed/tilt confirmations.
   bool transientFeedbackDismissed(unsigned long showTimeMs) const;
   void toggleHomeButtonInReader();
+  uint32_t liveSessionReadingSeconds() const;
+  void startSessionLog();
+  void stopSessionLog();
+  void toggleSessionLog();
+  bool shouldShowSessionLogPaused() const;
   void showRenderModeToast(uint8_t renderMode);
   void showSafeModeToast();
   bool storeRenderModeToastRegion(const char* msg);

@@ -283,6 +283,8 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
     SLEEP_ONLY = 34,
     WAKE_ONLY = 35,
     HOME_READER = 36,
+    // Fork: start/stop the manual reading session log (ReadingSessionLog).
+    TOGGLE_SESSION_LOG = 37,
     SHORT_PWRBTN_COUNT
   };
 
