@@ -5739,8 +5739,11 @@ void EpubReaderActivity::startSessionLog() {
   sessionLogActive = true;
   sessionLogBaselineSeconds = liveSessionReadingSeconds();
   sessionLogStartMs = millis();
-  if (epub) ReadingSessionLog::setLiveSession(epub->getTitle(), sessionLogStartMs);
   hasSessionLogStartLocalDateTime = getCurrentLocalReadingStatsDateTime(sessionLogStartLocalDateTime);
+  if (epub) {
+    ReadingSessionLog::setLiveSession(epub->getTitle(), sessionLogStartMs,
+                                      hasSessionLogStartLocalDateTime ? &sessionLogStartLocalDateTime : nullptr);
+  }
   LOG_INF("SESSION", "Manual log started");
 }
 

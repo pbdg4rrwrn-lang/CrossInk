@@ -329,12 +329,29 @@ namespace {
 bool liveActive = false;
 std::string liveTitle;
 unsigned long liveStartMs = 0;
+ReadingStatsDateTime liveStart;
+bool liveHasStart = false;
+
+// "2026-10-19T16:01-05:00" -> local date and time. False when empty or malformed.
+bool parseStart(const std::string& iso, ReadingStatsDateTime& out) {
+  unsigned year = 0, month = 0, day = 0, hour = 0, minute = 0;
+  if (sscanf(iso.c_str(), "%4u-%2u-%2uT%2u:%2u", &year, &month, &day, &hour, &minute) != 5) return false;
+  out = {};
+  out.date.year = static_cast<uint16_t>(year);
+  out.date.month = static_cast<uint8_t>(month);
+  out.date.day = static_cast<uint8_t>(day);
+  out.hour = static_cast<uint8_t>(hour);
+  out.minute = static_cast<uint8_t>(minute);
+  return out.isValid();
+}
 }  // namespace
 
-void setLiveSession(const std::string& title, const unsigned long startMs) {
+void setLiveSession(const std::string& title, const unsigned long startMs, const ReadingStatsDateTime* start) {
   liveActive = true;
   liveTitle = title;
   liveStartMs = startMs;
+  liveHasStart = start != nullptr && start->isValid();
+  liveStart = liveHasStart ? *start : ReadingStatsDateTime{};
 }
 
 void clearLiveSession() {
@@ -342,8 +359,7 @@ void clearLiveSession() {
   liveTitle.clear();
 }
 
-BookTotals totalsForTitle(const std::string& title, const ReadingStatsDate& today) {
-  BookTotals totals;
+void forEachSession(const std::function<void(const SessionRecord&)>& onSession) {
   if (Storage.exists(LOG_PATH)) {
     bool header = true;
     forEachLine(LOG_PATH, [&](const std::string& line) {
@@ -352,24 +368,36 @@ BookTotals totalsForTitle(const std::string& title, const ReadingStatsDate& toda
         return;
       }
       const std::vector<std::string> f = splitCsv(line);
-      if (f.size() < 6 || f[4] != title) return;
+      if (f.size() < 6) return;
+      SessionRecord record;
+      record.title = f[4];
+      record.hasStart = parseStart(f[0], record.start);
       const std::string& durationText = !f[3].empty() ? f[3] : f[2];
-      const uint32_t seconds = static_cast<uint32_t>(strtoul(durationText.c_str(), nullptr, 10));
-      totals.sessions++;
-      totals.totalSeconds += seconds;
-      unsigned year = 0, month = 0, day = 0;
-      if (today.isValid() && sscanf(f[0].c_str(), "%4u-%2u-%2u", &year, &month, &day) == 3 && year == today.year &&
-          month == today.month && day == today.day) {
-        totals.todaySeconds += seconds;
-      }
+      record.seconds = static_cast<uint32_t>(strtoul(durationText.c_str(), nullptr, 10));
+      onSession(record);
     });
   }
-  if (liveActive && liveTitle == title) {
-    const uint32_t liveSeconds = static_cast<uint32_t>((millis() - liveStartMs + 500UL) / 1000UL);
-    totals.sessions++;
-    totals.totalSeconds += liveSeconds;
-    if (today.isValid()) totals.todaySeconds += liveSeconds;
+  if (liveActive) {
+    SessionRecord record;
+    record.title = liveTitle;
+    record.hasStart = liveHasStart;
+    record.start = liveStart;
+    record.seconds = static_cast<uint32_t>((millis() - liveStartMs + 500UL) / 1000UL);
+    onSession(record);
   }
+}
+
+BookTotals totalsForTitle(const std::string& title, const ReadingStatsDate& today) {
+  BookTotals totals;
+  forEachSession([&](const SessionRecord& s) {
+    if (s.title != title) return;
+    totals.sessions++;
+    totals.totalSeconds += s.seconds;
+    if (today.isValid() && s.hasStart && s.start.date.year == today.year && s.start.date.month == today.month &&
+        s.start.date.day == today.day) {
+      totals.todaySeconds += s.seconds;
+    }
+  });
   return totals;
 }
 

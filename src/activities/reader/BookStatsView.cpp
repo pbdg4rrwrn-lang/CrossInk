@@ -288,6 +288,45 @@ void drawHorizontalBars(GfxRenderer& renderer, const int x, const int y, const i
   }
 }
 
+// Fork: one book's numbers rebuilt from my session log in a single pass. The charts
+// replay each session through CrossInk's own recordReadingSpan, so slots and
+// weekdays are split exactly the way CrossInk does it.
+struct BookLogView {
+  ReadingSessionLog::BookTotals totals;
+  BookReadingStats charts;  // only timeOfDaySeconds / dayOfWeekSeconds are used
+};
+
+BookLogView bookViewFromLog(const std::string& title) {
+  BookLogView view;
+  ReadingStatsDateTime now;
+  const bool hasToday = getCurrentLocalReadingStatsDateTime(now);
+  ReadingSessionLog::forEachSession([&](const ReadingSessionLog::SessionRecord& s) {
+    if (s.title != title) return;
+    view.totals.sessions++;
+    view.totals.totalSeconds += s.seconds;
+    if (!s.hasStart) return;
+    view.charts.recordReadingSpan(s.start, s.seconds);
+    if (hasToday && s.start.date.year == now.date.year && s.start.date.month == now.date.month &&
+        s.start.date.day == now.date.day) {
+      view.totals.todaySeconds += s.seconds;
+    }
+  });
+  return view;
+}
+
+// Fork: "This Device" totals, charts and streak rebuilt from my session log.
+// Completed books stays CrossInk's (it's books marked finished, not time).
+GlobalReadingStats globalStatsFromLog(const GlobalReadingStats& crossInk) {
+  GlobalReadingStats logged;
+  logged.completedBooks = crossInk.completedBooks;
+  ReadingSessionLog::forEachSession([&](const ReadingSessionLog::SessionRecord& s) {
+    logged.totalSessions++;
+    logged.totalReadingSeconds += s.seconds;
+    if (s.hasStart) logged.recordReadingSpan(s.start, s.seconds);
+  });
+  return logged;
+}
+
 // Fork: 3x3 grid for devices with a clock.
 //   Today      | Sessions     | Progress
 //   All Time   | Avg Session  | Pages/Min
@@ -298,7 +337,7 @@ void drawHorizontalBars(GfxRenderer& renderer, const int x, const int y, const i
 void drawPerBookStatsGrid(GfxRenderer& renderer, const int x, const int y, const int w, const int h,
                           const std::string& bookTitle, const BookReadingStats& stats, const float progressPercent,
                           const bool hasEstimatedTimeLeft, const uint32_t estimatedTimeLeftSeconds,
-                          const StatsLayout& layout) {
+                          const StatsLayout& layout, const ReadingSessionLog::BookTotals& logged) {
   const int thirdW = w / 3;
   const int rowH = (h - layout.topCardTitleH) / 3;
   const int row1Y = y + layout.topCardTitleH;
@@ -308,8 +347,6 @@ void drawPerBookStatsGrid(GfxRenderer& renderer, const int x, const int y, const
 
   ReadingStatsDateTime today;
   const bool hasToday = getCurrentLocalReadingStatsDateTime(today);
-  const ReadingSessionLog::BookTotals logged =
-      ReadingSessionLog::totalsForTitle(bookTitle, hasToday ? today.date : ReadingStatsDate{});
 
   // Row 1
   if (hasToday) {
@@ -381,7 +418,7 @@ void drawPerBookStatsGrid(GfxRenderer& renderer, const int x, const int y, const
 void drawPerBookStatsCard(GfxRenderer& renderer, const int x, const int y, const int w, const int h,
                           const std::string& bookTitle, const BookReadingStats& stats, const float progressPercent,
                           const bool hasEstimatedTimeLeft, const uint32_t estimatedTimeLeftSeconds,
-                          const StatsLayout& layout) {
+                          const StatsLayout& layout, const BookLogView* logView = nullptr) {
   renderer.drawRect(x, y, w, h);
   renderer.drawLine(x, y + layout.topCardTitleH, x + w, y + layout.topCardTitleH);
   const std::string visibleTitle =
@@ -391,8 +428,9 @@ void drawPerBookStatsCard(GfxRenderer& renderer, const int x, const int y, const
 
   const bool showRtcStats = shouldShowRtcBasedStats();
   if (showRtcStats) {
+    const ReadingSessionLog::BookTotals logged = logView ? logView->totals : bookViewFromLog(bookTitle).totals;
     drawPerBookStatsGrid(renderer, x, y, w, h, bookTitle, stats, progressPercent, hasEstimatedTimeLeft,
-                         estimatedTimeLeftSeconds, layout);
+                         estimatedTimeLeftSeconds, layout, logged);
     return;
   }
   const int thirdW = w / 3;
@@ -481,7 +519,10 @@ void drawPerBookStatsCard(GfxRenderer& renderer, const int x, const int y, const
 }
 
 void drawGlobalStatsCard(GfxRenderer& renderer, const int x, const int y, const int w, const int h, const char* title,
-                         const GlobalReadingStats& stats, const StatsLayout& layout) {
+                         const GlobalReadingStats& stats, const StatsLayout& layout,
+                         const GlobalReadingStats* paceStats = nullptr) {
+  // Fork: Pages/Min needs page counts, which only CrossInk's own stats have.
+  const GlobalReadingStats& pace = paceStats ? *paceStats : stats;
   renderer.drawRect(x, y, w, h);
   renderer.drawLine(x, y + layout.topCardTitleH, x + w, y + layout.topCardTitleH);
   const bool showRtcStats = shouldShowRtcBasedStats();
@@ -499,7 +540,7 @@ void drawGlobalStatsCard(GfxRenderer& renderer, const int x, const int y, const 
   BookReadingStats::formatDuration(stats.totalReadingSeconds, buf, sizeof(buf));
   drawStatCell(renderer, x + thirdW, thirdW, y + layout.topCardTitleH, rowH, buf, tr(STR_STATS_TIME_LBL));
 
-  snprintf(buf, sizeof(buf), "%.1f", pagesPerMinute(stats.totalPagesTurned, stats.totalReadingSeconds));
+  snprintf(buf, sizeof(buf), "%.1f", pagesPerMinute(pace.totalPagesTurned, pace.totalReadingSeconds));
   drawStatCell(renderer, x + thirdW * 2, thirdW, y + layout.topCardTitleH, rowH, buf, tr(STR_STATS_PAGES_PER_MIN));
 
   const uint32_t avgSecs = stats.totalSessions > 0 ? stats.totalReadingSeconds / stats.totalSessions : 0;
@@ -595,16 +636,18 @@ void renderPerBookStatsPage(GfxRenderer& renderer, const MappedInputManager* map
     const int dayOfWeekCardH = dayOfWeekH + dayOfWeekExtraHeight;
     topCardH += extraTopCardHeight;
 
+    const BookLogView logView = bookViewFromLog(bookTitle);
     drawPerBookStatsCard(renderer, cardX, y, cardW, topCardH, bookTitle, stats, progressPercent, hasEstimatedTimeLeft,
-                         estimatedTimeLeftSeconds, layout);
+                         estimatedTimeLeftSeconds, layout, &logView);
     y += topCardH + layout.cardGap;
 
     drawSectionCard(renderer, cardX, y, cardW, timeOfDayCardH, tr(STR_STATS_TIME_OF_DAY), layout);
-    drawHorizontalBars(renderer, cardX, y, cardW, timeOfDayCardH, stats.timeOfDaySeconds, TIME_BUCKET_LABELS, layout);
+    drawHorizontalBars(renderer, cardX, y, cardW, timeOfDayCardH, logView.charts.timeOfDaySeconds, TIME_BUCKET_LABELS,
+                       layout);
     y += timeOfDayCardH + layout.cardGap;
 
     drawSectionCard(renderer, cardX, y, cardW, dayOfWeekCardH, tr(STR_STATS_DAY_OF_WEEK), layout);
-    drawHorizontalBars(renderer, cardX, y, cardW, dayOfWeekCardH, stats.dayOfWeekSeconds, DAY_LABELS, layout);
+    drawHorizontalBars(renderer, cardX, y, cardW, dayOfWeekCardH, logView.charts.dayOfWeekSeconds, DAY_LABELS, layout);
   } else {
     const int compactContentHeight = headerHeight + layout.topGap + layout.topCardH;
     const int extraHeight = std::max(0, availableHeight - compactContentHeight);
@@ -633,7 +676,8 @@ void renderPerBookStatsPage(GfxRenderer& renderer, const MappedInputManager* map
 }
 
 void renderGlobalStatsPage(GfxRenderer& renderer, const MappedInputManager* mappedInput, const char* screenTitle,
-                           const GlobalReadingStats& stats, const bool showButtonHints, const bool showMoreButton) {
+                           const GlobalReadingStats& stats, const bool showButtonHints, const bool showMoreButton,
+                           const bool useSessionLog) {
   renderer.clearScreen();
   const bool showRtcStats = shouldShowRtcBasedStats();
   const auto& metrics = UITheme::getInstance().getMetrics();
@@ -670,15 +714,18 @@ void renderGlobalStatsPage(GfxRenderer& renderer, const MappedInputManager* mapp
     const int dayOfWeekCardH = dayOfWeekH + dayOfWeekExtraHeight;
     globalCardH += extraTopCardHeight;
 
-    drawGlobalStatsCard(renderer, cardX, y, cardW, globalCardH, tr(STR_STATS_ALL_TIME), stats, layout);
+    // Fork: "This Device" shows my session log; synced "All Devices" stays CrossInk's.
+    const GlobalReadingStats logStats = useSessionLog ? globalStatsFromLog(stats) : GlobalReadingStats{};
+    const GlobalReadingStats& shown = useSessionLog ? logStats : stats;
+    drawGlobalStatsCard(renderer, cardX, y, cardW, globalCardH, tr(STR_STATS_ALL_TIME), shown, layout, &stats);
     y += globalCardH + layout.cardGap;
 
     drawSectionCard(renderer, cardX, y, cardW, timeOfDayCardH, tr(STR_STATS_TIME_OF_DAY), layout);
-    drawHorizontalBars(renderer, cardX, y, cardW, timeOfDayCardH, stats.timeOfDaySeconds, TIME_BUCKET_LABELS, layout);
+    drawHorizontalBars(renderer, cardX, y, cardW, timeOfDayCardH, shown.timeOfDaySeconds, TIME_BUCKET_LABELS, layout);
     y += timeOfDayCardH + layout.cardGap;
 
     drawSectionCard(renderer, cardX, y, cardW, dayOfWeekCardH, tr(STR_STATS_DAY_OF_WEEK), layout);
-    drawHorizontalBars(renderer, cardX, y, cardW, dayOfWeekCardH, stats.dayOfWeekSeconds, DAY_LABELS, layout);
+    drawHorizontalBars(renderer, cardX, y, cardW, dayOfWeekCardH, shown.dayOfWeekSeconds, DAY_LABELS, layout);
   } else {
     const int compactContentHeight = headerHeight + layout.topGap + layout.globalCardH;
     globalCardH += std::max(0, availableHeight - compactContentHeight);

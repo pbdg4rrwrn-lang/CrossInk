@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -53,10 +54,23 @@ std::vector<RecentEntry> loadRecent(size_t maxCount);
 // /reading_sessions_deleted.csv, so a mistaken delete can be undone by hand.
 bool deleteEntry(const std::string& line);
 
-// The manual session that's running right now (not in the file yet), so "Today"
-// can include it. startMs is the millis() value when it started.
-void setLiveSession(const std::string& title, unsigned long startMs);
+// The manual session that's running right now (not in the file yet), so stats can
+// include it. startMs is millis() when it started; start is its local start time
+// (nullptr when the clock isn't set).
+void setLiveSession(const std::string& title, unsigned long startMs, const ReadingStatsDateTime* start);
 void clearLiveSession();
+
+// One logged session, as the stats screens use it.
+struct SessionRecord {
+  std::string title;
+  ReadingStatsDateTime start;  // local time; only meaningful when hasStart
+  bool hasStart = false;
+  uint32_t seconds = 0;  // elapsed time, or active time when elapsed is empty
+};
+
+// Calls onSession for every logged session (oldest first), then for the live
+// session if one is running. Reads the file line by line.
+void forEachSession(const std::function<void(const SessionRecord&)>& onSession);
 
 // Per-book numbers for the stats screen, all from the log. Each session's time is
 // its elapsed time (active time when elapsed is empty). The live session, if it's

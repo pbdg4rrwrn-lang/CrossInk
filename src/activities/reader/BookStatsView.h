@@ -25,8 +25,11 @@ void renderPerBookStatsPage(GfxRenderer& renderer, const MappedInputManager* map
                             uint32_t estimatedTimeLeftSeconds, bool showButtonHints, bool showEditButton,
                             bool showMoreButton);
 
+// useSessionLog (fork): rebuild totals, charts and streak from /reading_sessions.csv
+// instead of CrossInk's stats. Used for "This Device", not for synced "All Devices".
 void renderGlobalStatsPage(GfxRenderer& renderer, const MappedInputManager* mappedInput, const char* screenTitle,
-                           const GlobalReadingStats& stats, bool showButtonHints, bool showMoreButton);
+                           const GlobalReadingStats& stats, bool showButtonHints, bool showMoreButton,
+                           bool useSessionLog = false);
 
 void renderNoRtcCombinedStatsPage(GfxRenderer& renderer, const MappedInputManager* mappedInput,
                                   const std::string& bookTitle, const BookReadingStats& bookStats,
