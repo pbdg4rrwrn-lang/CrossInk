@@ -232,7 +232,9 @@ bool isValidQuickActionSlot(const uint8_t action) {
          action == CrossPointSettings::TOGGLE_HOME_BUTTON_IN_READER ||
          action == CrossPointSettings::TOGGLE_FRONTLIGHT || action == CrossPointSettings::TOGGLE_TOUCHSCREEN ||
          action == CrossPointSettings::PREVIOUS_PAGE || action == CrossPointSettings::NEARBY_POSITION_SYNC ||
-         action == CrossPointSettings::LIBRARY;
+         action == CrossPointSettings::LIBRARY ||
+         // Fork: session-log actions must survive a reload too.
+         action == CrossPointSettings::TOGGLE_SESSION_LOG || action == CrossPointSettings::SHOW_RECENT_SESSIONS;
 }
 
 uint8_t migrateTiltDirectionValue(const uint8_t direction) {
