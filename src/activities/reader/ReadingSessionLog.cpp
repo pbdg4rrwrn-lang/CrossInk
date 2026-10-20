@@ -1,5 +1,6 @@
 #include "ReadingSessionLog.h"
 
+#include <Arduino.h>
 #include <HalStorage.h>
 #include <Logging.h>
 
@@ -322,6 +323,54 @@ bool deleteEntry(const std::string& line) {
   if (!appendToDeletedLog(line)) LOG_ERR("SESSION", "Deleted, but failed to copy row to %s", DELETED_PATH);
   LOG_INF("SESSION", "Deleted session row");
   return true;
+}
+
+namespace {
+bool liveActive = false;
+std::string liveTitle;
+unsigned long liveStartMs = 0;
+}  // namespace
+
+void setLiveSession(const std::string& title, const unsigned long startMs) {
+  liveActive = true;
+  liveTitle = title;
+  liveStartMs = startMs;
+}
+
+void clearLiveSession() {
+  liveActive = false;
+  liveTitle.clear();
+}
+
+BookTotals totalsForTitle(const std::string& title, const ReadingStatsDate& today) {
+  BookTotals totals;
+  if (Storage.exists(LOG_PATH)) {
+    bool header = true;
+    forEachLine(LOG_PATH, [&](const std::string& line) {
+      if (header) {
+        header = false;
+        return;
+      }
+      const std::vector<std::string> f = splitCsv(line);
+      if (f.size() < 6 || f[4] != title) return;
+      const std::string& durationText = !f[3].empty() ? f[3] : f[2];
+      const uint32_t seconds = static_cast<uint32_t>(strtoul(durationText.c_str(), nullptr, 10));
+      totals.sessions++;
+      totals.totalSeconds += seconds;
+      unsigned year = 0, month = 0, day = 0;
+      if (today.isValid() && sscanf(f[0].c_str(), "%4u-%2u-%2u", &year, &month, &day) == 3 && year == today.year &&
+          month == today.month && day == today.day) {
+        totals.todaySeconds += seconds;
+      }
+    });
+  }
+  if (liveActive && liveTitle == title) {
+    const uint32_t liveSeconds = static_cast<uint32_t>((millis() - liveStartMs + 500UL) / 1000UL);
+    totals.sessions++;
+    totals.totalSeconds += liveSeconds;
+    if (today.isValid()) totals.todaySeconds += liveSeconds;
+  }
+  return totals;
 }
 
 }  // namespace ReadingSessionLog

@@ -503,6 +503,9 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t previousPageGesture = TAP_AND_SWIPE;
   uint8_t customBootscreenEnabled = 1;
   uint8_t tapToHideStatusBar = 1;
+  // Fork: let each reader swipe that opens a drawer be switched off (X4 Pro).
+  uint8_t readerSwipeDownTopDrawer = 1;
+  uint8_t readerSwipeUpReaderMenu = 1;
   // Disables all touchscreen input while a reader is active. Reader menus temporarily override this.
   uint8_t disableReaderTouchscreen = 0;
   // Available only on multi-touch hardware; defaults on for pinch font resizing.

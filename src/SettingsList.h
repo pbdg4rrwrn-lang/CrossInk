@@ -881,6 +881,11 @@ inline std::vector<SettingInfo> buildControlsTapsGesturesSettingsList(const std:
   if (hasPinch) addSettingByName(settings, allSettings, StrId::STR_PINCH_FONT_RESIZE);
   if (hasRotation) addSettingByName(settings, allSettings, StrId::STR_TWO_FINGER_ROTATION);
   addSettingByName(settings, allSettings, StrId::STR_TAP_HIDE_STATUS_BAR);
+  // Fork: drawer swipe switches, shown with the other touch gestures.
+  if (hasSettingByName(allSettings, StrId::STR_NEXT_PAGE)) {
+    addSettingByName(settings, allSettings, StrId::STR_SWIPE_DOWN_TOP_DRAWER);
+    addSettingByName(settings, allSettings, StrId::STR_SWIPE_UP_READER_MENU);
+  }
   if (hasTwoFingerSwipe) {
     settings.push_back(SettingInfo::Submenu(StrId::STR_TWO_FINGER_SWIPE, SettingAction::ControlsTwoFingerSwipe));
   }

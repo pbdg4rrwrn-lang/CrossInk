@@ -230,6 +230,10 @@ const std::vector<SettingInfo>& getBaseSettingsList() {
                           "previousPageGesture", StrId::STR_CAT_CONTROLS));
     add(SettingInfo::Toggle(StrId::STR_TAP_HIDE_STATUS_BAR, &CrossPointSettings::tapToHideStatusBar,
                             "tapToHideStatusBar", StrId::STR_CAT_CONTROLS));
+    add(SettingInfo::Toggle(StrId::STR_SWIPE_DOWN_TOP_DRAWER, &CrossPointSettings::readerSwipeDownTopDrawer,
+                            "readerSwipeDownTopDrawer", StrId::STR_CAT_CONTROLS));
+    add(SettingInfo::Toggle(StrId::STR_SWIPE_UP_READER_MENU, &CrossPointSettings::readerSwipeUpReaderMenu,
+                            "readerSwipeUpReaderMenu", StrId::STR_CAT_CONTROLS));
 
     // --- System ---
     add(SettingInfo::String(StrId::STR_DEVICE_NAME, SETTINGS.deviceName, sizeof(SETTINGS.deviceName), "deviceName",

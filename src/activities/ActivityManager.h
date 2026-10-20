@@ -181,6 +181,9 @@ class ActivityManager {
   bool openReaderSettingsForTouchscreenEscapeHatch();
   bool handleHomeButtonBackOrHome();
   bool openReaderMenuFromShortcut();
+  // Fork: opens the X4 Pro top drawer (frontlight panel) for a reader center tap.
+  // Same checks as the top-edge swipe; returns false when the drawer isn't available.
+  bool openFrontlightPanelFromTap();
   bool handleShortcutAction(uint8_t action);
   bool hasActivityNamed(const char* activityName) const;
 #ifdef SIMULATOR

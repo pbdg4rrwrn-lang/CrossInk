@@ -561,8 +561,9 @@ void ActivityManager::loop() {
       // Frontlight quick panel: top-edge down-swipe on home-key boards, except
       // that the open EPUB reader exposes the same action across the whole page.
       // Pushed, so it returns to whatever was underneath — including mid-book.
+      // Fork: the reader's swipe-down can be switched off in Settings > Controls.
       const bool lightPanelGesture = currentActivity->usesFullScreenReaderVerticalSwipes()
-                                         ? mappedInput.wasReaderLightPanelGesture()
+                                         ? SETTINGS.readerSwipeDownTopDrawer && mappedInput.wasReaderLightPanelGesture()
                                          : mappedInput.wasLightPanelGesture();
       if (supportsFrontlightDrawer(mappedInput.hasTouchHardware(), Frontlight.present(),
                                    hasStickyReaderDetailsPanel()) &&
@@ -804,6 +805,15 @@ bool ActivityManager::handleHomeButtonBackOrHome() {
 
 bool ActivityManager::openReaderMenuFromShortcut() {
   return currentActivity && pendingAction == PendingAction::None && currentActivity->openReaderSettingsMenu();
+}
+
+bool ActivityManager::openFrontlightPanelFromTap() {
+  if (!currentActivity || pendingAction != PendingAction::None) return false;
+  if (!supportsFrontlightDrawer(mappedInput.hasTouchHardware(), Frontlight.present(), hasStickyReaderDetailsPanel())) {
+    return false;
+  }
+  if (currentActivity->name == "FrontlightPanel" || !currentActivity->allowFrontlightPanelGesture()) return false;
+  return openFrontlightPanel(*currentActivity, renderer, mappedInput);
 }
 
 bool ActivityManager::handleShortcutAction(const uint8_t action) {

@@ -3131,6 +3131,16 @@ void EpubReaderActivity::loop() {
   if (!atEndOfBook && touch.tapped && handleTouchFootnoteLink(touch.x, touch.y)) {
     return;
   }
+  // Fork: a tap in the center box (middle third of width and height) opens the
+  // top drawer, like Kobo. Taps elsewhere keep turning pages as before.
+  if (!atEndOfBook && touch.tapped) {
+    const int w = renderer.getScreenWidth();
+    const int h = renderer.getScreenHeight();
+    const bool centerTap = touch.x >= w / 3 && touch.x < (w * 2) / 3 && touch.y >= h / 3 && touch.y < (h * 2) / 3;
+    if (centerTap && activityManager.openFrontlightPanelFromTap()) {
+      return;
+    }
+  }
 #endif
 
   // Long-press Confirm: execute the configured reader action without opening the menu.
@@ -5729,6 +5739,7 @@ void EpubReaderActivity::startSessionLog() {
   sessionLogActive = true;
   sessionLogBaselineSeconds = liveSessionReadingSeconds();
   sessionLogStartMs = millis();
+  if (epub) ReadingSessionLog::setLiveSession(epub->getTitle(), sessionLogStartMs);
   hasSessionLogStartLocalDateTime = getCurrentLocalReadingStatsDateTime(sessionLogStartLocalDateTime);
   LOG_INF("SESSION", "Manual log started");
 }
@@ -5736,6 +5747,7 @@ void EpubReaderActivity::startSessionLog() {
 void EpubReaderActivity::stopSessionLog() {
   if (!sessionLogActive) return;
   sessionLogActive = false;
+  ReadingSessionLog::clearLiveSession();
   const uint32_t live = liveSessionReadingSeconds();
   const uint32_t loggedSeconds = live > sessionLogBaselineSeconds ? live - sessionLogBaselineSeconds : 0;
   LOG_INF("SESSION", "Manual log stopped: %u s", static_cast<unsigned>(loggedSeconds));

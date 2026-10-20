@@ -53,4 +53,21 @@ std::vector<RecentEntry> loadRecent(size_t maxCount);
 // /reading_sessions_deleted.csv, so a mistaken delete can be undone by hand.
 bool deleteEntry(const std::string& line);
 
+// The manual session that's running right now (not in the file yet), so "Today"
+// can include it. startMs is the millis() value when it started.
+void setLiveSession(const std::string& title, unsigned long startMs);
+void clearLiveSession();
+
+// Per-book numbers for the stats screen, all from the log. Each session's time is
+// its elapsed time (active time when elapsed is empty). The live session, if it's
+// for this book, counts as one more session.
+struct BookTotals {
+  uint32_t sessions = 0;
+  uint32_t totalSeconds = 0;
+  uint32_t todaySeconds = 0;  // sessions that started on `today`; 0 when today is unknown
+};
+
+// One pass over the log. `today` may be invalid (clock not set).
+BookTotals totalsForTitle(const std::string& title, const ReadingStatsDate& today);
+
 }  // namespace ReadingSessionLog

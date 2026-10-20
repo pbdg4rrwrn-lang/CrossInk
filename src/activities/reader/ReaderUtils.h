@@ -202,8 +202,8 @@ inline bool isTopStatusBarTap(const GfxRenderer& renderer, const int y, const in
 inline bool isTouchMenuGesture(const MappedInputManager& input) {
   // The capacitive Home key is independent from screen touch. Its configured
   // long-press reader-menu action must still work when screen touch is disabled.
-  return input.wasReaderMenuHold() ||
-         (SETTINGS.touchReaderControls && input.hasTouch() && input.wasReaderMenuGesture());
+  return input.wasReaderMenuHold() || (SETTINGS.touchReaderControls && SETTINGS.readerSwipeUpReaderMenu &&
+                                       input.hasTouch() && input.wasReaderMenuGesture());
 }
 
 // X4 Pro opens the reader menu with an upward swipe. Its top-edge downward

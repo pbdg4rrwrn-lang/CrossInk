@@ -10,6 +10,7 @@
 #include <cstdio>
 
 #include "MappedInputManager.h"
+#include "ReadingSessionLog.h"
 #include "components/CompactHeader.h"
 #include "components/TouchActionButtons.h"
 #include "components/TouchHeaderBackButton.h"
@@ -287,6 +288,96 @@ void drawHorizontalBars(GfxRenderer& renderer, const int x, const int y, const i
   }
 }
 
+// Fork: 3x3 grid for devices with a clock.
+//   Today      | Sessions     | Progress
+//   All Time   | Avg Session  | Pages/Min
+//   Time Left  | Started      | Est. Finish Date
+// Today, Sessions, All Time and Avg Session come from my session log
+// (reading_sessions.csv + the running session). Pages/Min, Time Left and the
+// finish date still use CrossInk's own reading pace.
+void drawPerBookStatsGrid(GfxRenderer& renderer, const int x, const int y, const int w, const int h,
+                          const std::string& bookTitle, const BookReadingStats& stats, const float progressPercent,
+                          const bool hasEstimatedTimeLeft, const uint32_t estimatedTimeLeftSeconds,
+                          const StatsLayout& layout) {
+  const int thirdW = w / 3;
+  const int rowH = (h - layout.topCardTitleH) / 3;
+  const int row1Y = y + layout.topCardTitleH;
+  const int row2Y = row1Y + rowH;
+  const int row3Y = row2Y + rowH;
+  char buf[40];
+
+  ReadingStatsDateTime today;
+  const bool hasToday = getCurrentLocalReadingStatsDateTime(today);
+  const ReadingSessionLog::BookTotals logged =
+      ReadingSessionLog::totalsForTitle(bookTitle, hasToday ? today.date : ReadingStatsDate{});
+
+  // Row 1
+  if (hasToday) {
+    BookReadingStats::formatDuration(logged.todaySeconds, buf, sizeof(buf));
+  } else {
+    snprintf(buf, sizeof(buf), "-");
+  }
+  drawStatCell(renderer, x, thirdW, row1Y, rowH, buf, tr(STR_STATS_TODAY));
+
+  snprintf(buf, sizeof(buf), "%u", static_cast<unsigned>(logged.sessions));
+  drawStatCell(renderer, x + thirdW, thirdW, row1Y, rowH, buf, tr(STR_STATS_SESSIONS_LBL));
+
+  if (progressPercent >= 0.0f) {
+    snprintf(buf, sizeof(buf), "%d%%", static_cast<int>(progressPercent + 0.5f));
+  } else {
+    snprintf(buf, sizeof(buf), "-");
+  }
+  drawStatCell(renderer, x + thirdW * 2, thirdW, row1Y, rowH, buf, tr(STR_STATS_PROGRESS_LBL));
+
+  // Row 2
+  BookReadingStats::formatDuration(logged.totalSeconds, buf, sizeof(buf));
+  drawStatCell(renderer, x, thirdW, row2Y, rowH, buf, tr(STR_STATS_BOOK_ALL_TIME));
+
+  const uint32_t avgSecs = logged.sessions > 0 ? logged.totalSeconds / logged.sessions : 0;
+  BookReadingStats::formatDuration(avgSecs, buf, sizeof(buf));
+  drawStatCell(renderer, x + thirdW, thirdW, row2Y, rowH, buf, tr(STR_STATS_AVG_SESSION_LBL));
+
+  snprintf(buf, sizeof(buf), "%.1f", pagesPerMinute(stats.totalPagesTurned, stats.totalReadingSeconds));
+  drawStatCell(renderer, x + thirdW * 2, thirdW, row2Y, rowH, buf, tr(STR_STATS_PAGES_PER_MIN));
+
+  // Row 3
+  uint32_t fallbackEstimateSeconds = 0;
+  uint32_t cachedEstimateSeconds = 0;
+  const bool hasCachedEstimate = cachedEstimatedTimeLeft(stats, cachedEstimateSeconds);
+  const bool hasFallbackEstimate = fallbackEstimatedTimeLeft(stats, progressPercent, fallbackEstimateSeconds);
+  const bool hasEstimate = hasEstimatedTimeLeft || hasCachedEstimate || hasFallbackEstimate;
+  const uint32_t remainingReadingSeconds = hasEstimatedTimeLeft ? estimatedTimeLeftSeconds
+                                           : hasCachedEstimate  ? cachedEstimateSeconds
+                                                                : fallbackEstimateSeconds;
+  if (!stats.isCompleted && hasEstimate) {
+    formatCompactReadingDuration(remainingReadingSeconds, buf, sizeof(buf));
+  } else {
+    snprintf(buf, sizeof(buf), "-");
+  }
+  drawStatCell(renderer, x, thirdW, row3Y, rowH, buf, tr(STR_TIME_LEFT));
+
+  // Tapping Started still opens the date editor, as before.
+  formatReadingStatsShortDate(stats.startDate, buf, sizeof(buf));
+  TouchRegistry::getInstance().add(Rect(x + thirdW, row3Y, thirdW, rowH), BookStatsTouchTarget::StartedDaysStat,
+                                   TouchRegistry::Item);
+  drawStatCell(renderer, x + thirdW, thirdW, row3Y, rowH, buf, tr(STR_STATS_STARTED));
+
+  ReadingStatsDate finishDisplayDate;
+  const bool finished = stats.isCompleted;
+  if (finished) {
+    finishDisplayDate = stats.finishedDate;
+  } else if (hasToday && hasEstimate) {
+    if (!estimateFinishDateFromDailyPace(stats, today, remainingReadingSeconds, finishDisplayDate)) {
+      ReadingStatsDateTime estimatedFinish = today;
+      addSecondsToReadingStatsDateTime(estimatedFinish, remainingReadingSeconds);
+      finishDisplayDate = estimatedFinish.date;
+    }
+  }
+  formatReadingStatsShortDate(finishDisplayDate, buf, sizeof(buf));
+  drawStatCell(renderer, x + thirdW * 2, thirdW, row3Y, rowH, buf,
+               finished ? tr(STR_STATS_FINISHED_DATE) : tr(STR_STATS_EST_FINISH_DATE));
+}
+
 void drawPerBookStatsCard(GfxRenderer& renderer, const int x, const int y, const int w, const int h,
                           const std::string& bookTitle, const BookReadingStats& stats, const float progressPercent,
                           const bool hasEstimatedTimeLeft, const uint32_t estimatedTimeLeftSeconds,
@@ -299,6 +390,11 @@ void drawPerBookStatsCard(GfxRenderer& renderer, const int x, const int y, const
                     y + (layout.topCardTitleH - renderer.getLineHeight(UI_10_FONT_ID)) / 2, visibleTitle.c_str(), true);
 
   const bool showRtcStats = shouldShowRtcBasedStats();
+  if (showRtcStats) {
+    drawPerBookStatsGrid(renderer, x, y, w, h, bookTitle, stats, progressPercent, hasEstimatedTimeLeft,
+                         estimatedTimeLeftSeconds, layout);
+    return;
+  }
   const int thirdW = w / 3;
   const int halfW = w / 2;
   const int rowCount = showRtcStats ? 3 : 2;
