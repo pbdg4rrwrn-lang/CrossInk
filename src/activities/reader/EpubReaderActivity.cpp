@@ -2642,16 +2642,18 @@ void EpubReaderActivity::openReaderMenu() {
         prepareCurrentSectionForRelayout();
         section.reset();
       }
-      {
-        RenderLock lock(*this);
-        clearFootnotePreviewState();
-        currentSpineIndex = chapter->spineIndex;
-        pendingAnchor = chapter->anchor;
-        nextPageNumber = 0;
-        section.reset();
+      if (!sessionLogLocksPosition("drawer_chapter")) {
+        {
+          RenderLock lock(*this);
+          clearFootnotePreviewState();
+          currentSpineIndex = chapter->spineIndex;
+          pendingAnchor = chapter->anchor;
+          nextPageNumber = 0;
+          section.reset();
+        }
+        armReadingPaceWarmup("chapter_jump");
+        pauseReadingPaceTimer("chapter_jump");
       }
-      armReadingPaceWarmup("chapter_jump");
-      pauseReadingPaceTimer("chapter_jump");
       requestUpdate();
       return;
     }
@@ -3224,6 +3226,7 @@ void EpubReaderActivity::loop() {
         case CrossPointSettings::SIDE_NEXT_CHAPTER: {
           const bool next = side.action == CrossPointSettings::SIDE_NEXT_CHAPTER;
           clearPendingManualPageTurns();
+          if (sessionLogLocksPosition("side_chapter")) break;
           if (!next && isAtBookStart()) break;
           if (!next && section && section->currentPage > 0) {
             section->currentPage = 0;
@@ -3303,6 +3306,7 @@ void EpubReaderActivity::loop() {
       frontButtonLongPressHandled = true;
       if (SETTINGS.longPressButtonBehavior == CrossPointSettings::CHAPTER_SKIP) {
         clearPendingManualPageTurns();
+        if (sessionLogLocksPosition("front_chapter_skip")) return;
         if (!nextLongPressed && currentSpineIndex <= 0) {
           bool changed = false;
           {
@@ -3382,6 +3386,10 @@ void EpubReaderActivity::loop() {
     heldLongPowerTurn = true;
   }
   prevTriggered = prevTriggered || shortPowerPrevious || releasedLongPowerPrevious;
+  if ((prevTriggered || nextTriggered) && sessionLogLocksPosition("page_turn_input")) {
+    clearPendingManualPageTurns();
+    return;
+  }
   if (!prevTriggered && !nextTriggered) {
     if (drainPendingManualPageTurn()) {
       return;
@@ -3503,6 +3511,7 @@ bool EpubReaderActivity::handleTwoFingerSwipeAction(const CrossPointSettings::TW
         targetSpine = previousChapterFirstSpineIndex;
       }
       if (activeFootnotePreview || targetSpine < 0 || targetSpine >= epub->getSpineItemsCount()) return true;
+      if (sessionLogLocksPosition("two_finger_chapter")) return true;
       clearPendingManualPageTurns();
       {
         RenderLock lock(*this);
@@ -3522,6 +3531,7 @@ bool EpubReaderActivity::handleTwoFingerSwipeAction(const CrossPointSettings::TW
 // Translate an absolute percent into a spine index plus a normalized position
 // within that spine so we can jump after the section is loaded.
 void EpubReaderActivity::jumpToPercent(float percent) {
+  if (sessionLogLocksPosition("go_to_percent")) return;
   pageLoadRetryCount = 0;
   if (!epub) {
     return;
@@ -3603,6 +3613,7 @@ void EpubReaderActivity::jumpToPercent(float percent) {
 }
 
 void EpubReaderActivity::jumpToStablePage(const uint32_t page) {
+  if (sessionLogLocksPosition("go_to_page")) return;
   pageLoadRetryCount = 0;
   if (!epub) return;
 
@@ -3634,6 +3645,7 @@ void EpubReaderActivity::jumpToStablePage(const uint32_t page) {
 }
 
 void EpubReaderActivity::handleClippingJump(const ClippingJumpResult& clipping) {
+  if (sessionLogLocksPosition("clipping_jump")) return;
   clearPendingManualPageTurns();
   RenderLock lock(*this);
   clearFootnotePreviewState();
@@ -3851,7 +3863,7 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuAction action, const 
       startActivityForResult(
           std::make_unique<EpubReaderChapterSelectionActivity>(renderer, mappedInput, epub, path, spineIdx),
           [this, returnToReaderMenu](const ActivityResult& result) {
-            if (!result.isCancelled) {
+            if (!result.isCancelled && !sessionLogLocksPosition("chapter_selection")) {
               const auto& chapterResult = std::get<ChapterResult>(result.data);
               RenderLock lock(*this);
 
@@ -4211,6 +4223,10 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuAction action, const 
       break;
     }
     case EpubReaderMenuAction::SYNC: {
+      if (sessionLogLocksPosition("koreader_sync")) {
+        requestUpdate();
+        break;
+      }
       if (!KOREADER_STORE.hasCredentials()) {
         pauseReadingPaceTimer("koreader_settings");
         saveProgressBeforeRestart();
@@ -4251,6 +4267,10 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuAction action, const 
       break;
     }
     case EpubReaderMenuAction::NEARBY_POSITION_SYNC: {
+      if (sessionLogLocksPosition("nearby_sync")) {
+        requestUpdate();
+        break;
+      }
       const int currentPage = section ? section->currentPage : nextPageNumber;
       const int totalPages = section ? section->estimatedTotalPages() : std::max(1, cachedChapterTotalPageCount);
       std::optional<uint16_t> paragraphIndex;
@@ -4360,7 +4380,7 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuAction action, const 
       startActivityForResult(
           std::make_unique<EpubReaderBookmarkListActivity>(renderer, mappedInput, BOOKMARKS.getBookmarks()),
           [this, returnToReaderMenu](const ActivityResult& result) {
-            if (!result.isCancelled) {
+            if (!result.isCancelled && !sessionLogLocksPosition("bookmark_jump")) {
               const auto& bm = std::get<BookmarkResult>(result.data);
               RenderLock lock(*this);
               clearFootnotePreviewState();
@@ -5830,6 +5850,15 @@ void EpubReaderActivity::openSessionDeleteConfirm() {
 
 bool EpubReaderActivity::shouldShowSessionLogPaused() const { return statsTrackingActive && !sessionLogActive; }
 
+// Fork: while PAUSED nothing may move the reading position (page turns, chapter
+// skips, jumps, links, sync). Font/margin/orientation changes still work because
+// CrossInk keeps the same spot when it reflows.
+bool EpubReaderActivity::sessionLogLocksPosition(const char* what) const {
+  if (!shouldShowSessionLogPaused()) return false;
+  LOG_DBG("SESSION", "Paused: ignored %s", what ? what : "position change");
+  return true;
+}
+
 void EpubReaderActivity::toggleHomeButtonInReader() {
   if (!gpio.hasHomeKey()) return;
   SETTINGS.homeButtonInReaderEnabled = SETTINGS.homeButtonInReaderEnabled ? 0 : 1;
@@ -5986,6 +6015,7 @@ void EpubReaderActivity::setAutoPageTurnIntervalSeconds(uint16_t seconds) {
 }
 
 void EpubReaderActivity::requestManualPageTurn(const bool isForwardTurn, const char* source) {
+  if (sessionLogLocksPosition(source)) return;
   finishManualPageTurnBrakeIfReady();
   const ManualPageTurnRequest request{isForwardTurn, source};
   if (pendingManualPageTurns.dispatchedDirectionOpposes(isForwardTurn)) {
@@ -6070,6 +6100,7 @@ bool EpubReaderActivity::isAtBookStart() const {
 }
 
 void EpubReaderActivity::pageTurn(bool isForwardTurn, const char* source) {
+  if (sessionLogLocksPosition(source)) return;
   if (!isForwardTurn && isAtBookStart()) return;
   pageLoadRetryCount = 0;
   if (activeFootnotePreview) {
@@ -8185,6 +8216,7 @@ void EpubReaderActivity::navigateToHref(const std::string& hrefStr, const bool s
                                         const bool preferFootnotePreview) {
   pageLoadRetryCount = 0;
   if (!epub) return;
+  if (sessionLogLocksPosition("link_navigation")) return;
 
   // Extract fragment anchor (e.g. "#note1" or "chapter2.xhtml#note1")
   std::string anchor;

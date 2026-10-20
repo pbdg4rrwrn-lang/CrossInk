@@ -488,6 +488,8 @@ class EpubReaderActivity final : public Activity {
   void stopSessionLog();
   void toggleSessionLog();
   bool shouldShowSessionLogPaused() const;
+  // True while PAUSED: the reading position must not change, so the caller does nothing.
+  bool sessionLogLocksPosition(const char* what) const;
   void openRecentSessions();
   void openSessionDeleteConfirm();
   void showRenderModeToast(uint8_t renderMode);
